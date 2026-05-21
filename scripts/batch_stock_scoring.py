@@ -703,7 +703,7 @@ def build_report(df: pd.DataFrame, as_of: str) -> str:
   - 基本面：akshare `stock_financial_abstract_new_ths`
   - 实时快照：akshare `stock_individual_spot_xq`
   - 趋势日线：akshare `stock_zh_a_daily`
-  - 说明：若 2026-05-20 当日日线尚未完全落库，则均线与涨幅基于最新可得日线；资金参与强度优先取 2026-05-20 实时快照。
+  - 说明：若 {as_of} 当日日线尚未完全落库，则均线与涨幅基于最新可得日线；资金参与强度优先取 {as_of} 实时快照。
 
 ## 打分标准
 
@@ -810,16 +810,23 @@ def main() -> None:
 
     date_tag = args.as_of.replace("-", "")
     csv_path = output_dir / f"stock_list_scored_{date_tag}.csv"
+    xlsx_path = output_dir / f"stock_list_scored_{date_tag}.xlsx"
     json_path = output_dir / f"stock_list_scored_{date_tag}.json"
     md_path = output_dir / f"stock_list_scoring_report_{date_tag}.md"
 
     scored_df.to_csv(csv_path, index=False, encoding="utf-8-sig")
+    try:
+        scored_df.to_excel(xlsx_path, index=False)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[WARN] XLSX 导出失败: {exc}", flush=True)
     scored_df.to_json(json_path, orient="records", force_ascii=False, indent=2)
 
     report = build_report(scored_df, args.as_of)
     md_path.write_text(report, encoding="utf-8")
 
     print(f"[DONE] CSV: {csv_path}", flush=True)
+    if xlsx_path.exists():
+        print(f"[DONE] XLSX: {xlsx_path}", flush=True)
     print(f"[DONE] JSON: {json_path}", flush=True)
     print(f"[DONE] MD: {md_path}", flush=True)
 
