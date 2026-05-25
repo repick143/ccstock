@@ -40,6 +40,31 @@ import pandas as pd
 pd.set_option("display.max_columns", 200)
 
 
+REQUIRED_SCORE_COLUMNS = [
+    "月涨幅(%)",
+    "年涨幅(%)",
+    "周转率",
+    "成交额_亿元",
+    "60日涨幅",
+    "120日涨幅",
+    "52周最高",
+    "52周最低",
+    "信号价",
+    "MA5",
+    "MA10",
+    "MA20",
+    "MA60",
+    "MA120",
+    "20日回撤",
+    "总市值_亿元",
+    "市盈率_TTM",
+    "毛利率",
+    "ROE",
+    "营收同比",
+    "归母净利润同比",
+]
+
+
 HOT_SUBTRACK_KEYWORDS = {
     "CPO光引擎": 20,
     "高速光模块": 19,
@@ -615,6 +640,10 @@ def fetch_one(row: pd.Series, pause: float, timeout_sec: float) -> Dict[str, Any
 
 def add_relative_features(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
+    for column in REQUIRED_SCORE_COLUMNS:
+        if column not in out.columns:
+            out[column] = np.nan
+
     out["月涨幅分位"] = pct_rank_series(out["月涨幅(%)"]).fillna(0.5)
     out["年涨幅分位"] = pct_rank_series(out["年涨幅(%)"]).fillna(0.5)
     out["换手率分位"] = pct_rank_series(out["周转率"]).fillna(0.5)

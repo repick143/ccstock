@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from batch_stock_scoring import fetch_one, read_stock_list
+from batch_stock_scoring import read_stock_list
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -61,23 +61,6 @@ def run_live_analysis(run_dir: Path, as_of: str) -> subprocess.CompletedProcess[
         as_of,
     ]
     return subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True, check=False)
-
-
-def preflight_live_fetch() -> tuple[bool, str]:
-    stock_df = read_stock_list(INPUT_CSV)
-    first = stock_df.iloc[0]
-    try:
-        record = fetch_one(first, pause=0.0, timeout_sec=4.0)
-    except Exception as exc:  # noqa: BLE001
-        return False, f"首只样本探测失败: {exc!r}"
-
-    has_any_data = any(
-        pd.notna(record.get(field))
-        for field in ["现价", "MA20", "毛利率", "总市值_亿元", "ROE"]
-    )
-    if not has_any_data:
-        return False, "首只样本探测未拿到实时快照、日线或财务摘要"
-    return True, "首只样本探测通过"
 
 
 def output_is_usable(csv_path: Path) -> tuple[bool, str]:
@@ -164,20 +147,8 @@ def main() -> None:
     sample_count = len(stock_df)
     output_paths = expected_output_paths(run_dir, as_of)
 
-    preflight_ok, preflight_msg = preflight_live_fetch()
-    if preflight_ok:
-        result = run_live_analysis(run_dir, as_of)
-        usable, validation = output_is_usable(output_paths["csv"])
-        validation = f"{preflight_msg}；{validation}"
-    else:
-        result = subprocess.CompletedProcess(
-            args=["preflight"],
-            returncode=1,
-            stdout="",
-            stderr=preflight_msg,
-        )
-        usable = False
-        validation = preflight_msg
+    result = run_live_analysis(run_dir, as_of)
+    usable, validation = output_is_usable(output_paths["csv"])
 
     if not usable:
         cleanup_generated_files(output_paths)
