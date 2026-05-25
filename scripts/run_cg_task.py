@@ -3,17 +3,15 @@
 执行 cg 自动化任务：
 1. 在 cg_task/output 下创建新的时间戳目录
 2. 尝试运行批量 A 股评分脚本
-3. 若实时抓取结果明显失效，则回退为最近一次成功产物
+3. 若抓取失败或结果明显失效，则直接报错
 4. 生成本次运行说明
 """
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import List
 
 import pandas as pd
 
@@ -107,40 +105,15 @@ def cleanup_generated_files(paths: dict) -> None:
             path.unlink()
 
 
-def find_latest_success_dir(exclude_dir: Path) -> Path:
-    candidates: List[Path] = []
-    for child in sorted(OUTPUT_ROOT.iterdir(), reverse=True):
-        if not child.is_dir() or child == exclude_dir:
-            continue
-        if list(child.glob("stock_list_scored_*.csv")) and list(child.glob("stock_list_scoring_report_*.md")):
-            candidates.append(child)
-    if not candidates:
-        raise RuntimeError("未找到可复用的历史成功结果目录")
-    return candidates[0]
-
-
-def copy_success_artifacts(src_dir: Path, dst_dir: Path) -> List[str]:
-    copied = []
-    for pattern in ["stock_list_scored_*.csv", "stock_list_scored_*.xlsx", "stock_list_scored_*.json", "stock_list_scoring_report_*.md"]:
-        for src in src_dir.glob(pattern):
-            dst = dst_dir / src.name
-            shutil.copy2(src, dst)
-            copied.append(src.name)
-    copied.sort()
-    return copied
-
-
 def write_run_note(
     run_dir: Path,
     run_time: datetime,
-    mode: str,
+    success: bool,
     as_of: str,
     sample_count: int,
     stdout: str,
     stderr: str,
     validation: str,
-    reused_from: Path | None,
-    copied_files: List[str],
 ) -> None:
     lines = [
         "# 本次自动化运行说明",
@@ -149,7 +122,7 @@ def write_run_note(
         f"- 交付目录：`{run_dir.relative_to(ROOT)}`",
         f"- 输入文件：`{INPUT_CSV.relative_to(ROOT)}`",
         f"- 样本数量：{sample_count}",
-        f"- 运行模式：{'实时抓取成功' if mode == 'live' else '失败后复用历史结果'}",
+        f"- 运行结果：{'成功' if success else '失败'}",
         f"- 分析日期参数：`{as_of}`",
         "",
         "## 数据口径",
@@ -159,14 +132,6 @@ def write_run_note(
         "- 趋势日线：`akshare.stock_zh_a_daily`",
         f"- 结果有效性检查：{validation}",
     ]
-
-    if reused_from is not None:
-        lines.extend(
-            [
-                f"- 回退来源：`{reused_from.relative_to(ROOT)}`",
-                f"- 复用文件：{', '.join(copied_files)}",
-            ]
-        )
 
     lines.extend(
         [
@@ -214,27 +179,29 @@ def main() -> None:
         usable = False
         validation = preflight_msg
 
-    reused_from = None
-    copied_files: List[str] = []
-    mode = "live"
-
     if not usable:
         cleanup_generated_files(output_paths)
-        reused_from = find_latest_success_dir(exclude_dir=run_dir)
-        copied_files = copy_success_artifacts(reused_from, run_dir)
-        mode = "reuse"
+        write_run_note(
+            run_dir=run_dir,
+            run_time=run_time,
+            success=False,
+            as_of=as_of,
+            sample_count=sample_count,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            validation=validation,
+        )
+        raise RuntimeError(f"本次任务失败，未复用历史结果：{validation}")
 
     write_run_note(
         run_dir=run_dir,
         run_time=run_time,
-        mode=mode,
+        success=True,
         as_of=as_of,
         sample_count=sample_count,
         stdout=result.stdout,
         stderr=result.stderr,
         validation=validation,
-        reused_from=reused_from,
-        copied_files=copied_files,
     )
 
     print(f"[DONE] {run_dir}")
