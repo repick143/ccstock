@@ -778,6 +778,14 @@ def build_scores(df: pd.DataFrame) -> pd.DataFrame:
     return out.sort_values(["综合打分", "基本面打分"], ascending=[False, False]).reset_index(drop=True)
 
 
+def build_delivery_sheet(df: pd.DataFrame) -> pd.DataFrame:
+    delivery = df.copy()
+    for column in BASE_OUTPUT_COLUMNS:
+        if column not in delivery.columns:
+            delivery[column] = np.nan
+    return delivery[BASE_OUTPUT_COLUMNS].copy()
+
+
 def render_top_table(df: pd.DataFrame, columns: List[str], top_n: int) -> str:
     sub = df.reindex(columns=columns).head(top_n).copy()
     return sub.to_markdown(index=False)
@@ -936,9 +944,11 @@ def main() -> None:
     json_path = output_dir / f"stock_list_scored_{date_tag}.json"
     md_path = output_dir / f"stock_list_scoring_report_{date_tag}.md"
 
-    scored_df.to_csv(csv_path, index=False, encoding="utf-8-sig")
+    delivery_df = build_delivery_sheet(scored_df)
+
+    delivery_df.to_csv(csv_path, index=False, encoding="utf-8-sig")
     try:
-        scored_df.to_excel(xlsx_path, index=False)
+        delivery_df.to_excel(xlsx_path, index=False)
     except Exception as exc:  # noqa: BLE001
         print(f"[WARN] XLSX 导出失败: {exc}", flush=True)
     scored_df.to_json(json_path, orient="records", force_ascii=False, indent=2)

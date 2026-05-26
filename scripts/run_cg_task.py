@@ -39,6 +39,10 @@ def read_scored_csv(path: Path) -> pd.DataFrame:
     return pd.read_csv(path, encoding="utf-8-sig")
 
 
+def read_scored_json(path: Path) -> pd.DataFrame:
+    return pd.read_json(path)
+
+
 def expected_output_paths(run_dir: Path, as_of: str) -> dict:
     date_tag = as_of.replace("-", "")
     return {
@@ -63,11 +67,15 @@ def run_live_analysis(run_dir: Path, as_of: str) -> subprocess.CompletedProcess[
     return subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True, check=False)
 
 
-def output_is_usable(csv_path: Path) -> tuple[bool, str]:
+def output_is_usable(paths: dict) -> tuple[bool, str]:
+    csv_path = paths["csv"]
+    json_path = paths["json"]
     if not csv_path.exists():
         return False, "未生成评分明细 CSV"
+    if not json_path.exists():
+        return False, "未生成结构化 JSON 明细"
 
-    df = read_scored_csv(csv_path)
+    df = read_scored_json(json_path)
     row_count = len(df)
     if row_count == 0:
         return False, "评分结果为空"
@@ -121,9 +129,9 @@ def write_run_note(
             "",
             "## 文件说明",
             "",
-            "- `stock_list_scored_*.csv`：批量评分明细表",
-            "- `stock_list_scored_*.xlsx`：Excel 版本明细表",
-            "- `stock_list_scored_*.json`：结构化结果",
+            "- `stock_list_scored_*.csv`：仅回填原始 13 列的交付表",
+            "- `stock_list_scored_*.xlsx`：Excel 版本交付表",
+            "- `stock_list_scored_*.json`：保留全部抓取字段、评分细项与错误信息的结构化明细",
             "- `stock_list_scoring_report_*.md`：评分标准、Top 排名和异常样本说明",
             "",
             "## 执行备注",
@@ -148,7 +156,7 @@ def main() -> None:
     output_paths = expected_output_paths(run_dir, as_of)
 
     result = run_live_analysis(run_dir, as_of)
-    usable, validation = output_is_usable(output_paths["csv"])
+    usable, validation = output_is_usable(output_paths)
 
     if not usable:
         cleanup_generated_files(output_paths)
