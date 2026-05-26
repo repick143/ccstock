@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import subprocess
-import socket
 from datetime import datetime
 from pathlib import Path
 
@@ -20,15 +19,10 @@ from batch_stock_scoring import read_stock_list
 
 
 ROOT = Path(__file__).resolve().parents[1]
-INPUT_CSV = ROOT / "cg_task" / "file" / "stock_list.csv"
+INPUT_CSV = ROOT / "cg_task" / "file" / "stock_list(2).csv"
 OUTPUT_ROOT = ROOT / "cg_task" / "output"
 BATCH_SCRIPT = ROOT / "scripts" / "batch_stock_scoring.py"
 TIMEZONE_LABEL = "Asia/Shanghai"
-REQUIRED_HOSTS = [
-    "xueqiu.com",
-    "finance.sina.com.cn",
-    "basic.10jqka.com.cn",
-]
 
 
 def now_local() -> datetime:
@@ -94,18 +88,6 @@ def cleanup_generated_files(paths: dict) -> None:
             path.unlink()
 
 
-def check_required_hosts() -> tuple[bool, str]:
-    failures: list[str] = []
-    for host in REQUIRED_HOSTS:
-        try:
-            socket.getaddrinfo(host, 443)
-        except socket.gaierror as exc:
-            failures.append(f"{host}: {exc}")
-    if failures:
-        return False, "核心数据源域名解析失败：" + "；".join(failures)
-    return True, "核心数据源域名解析正常"
-
-
 def write_run_note(
     run_dir: Path,
     run_time: datetime,
@@ -164,20 +146,6 @@ def main() -> None:
     stock_df = read_stock_list(INPUT_CSV)
     sample_count = len(stock_df)
     output_paths = expected_output_paths(run_dir, as_of)
-
-    hosts_ok, host_validation = check_required_hosts()
-    if not hosts_ok:
-        write_run_note(
-            run_dir=run_dir,
-            run_time=run_time,
-            success=False,
-            as_of=as_of,
-            sample_count=sample_count,
-            stdout="",
-            stderr="",
-            validation=host_validation,
-        )
-        raise RuntimeError(f"本次任务失败，未复用历史结果：{host_validation}")
 
     result = run_live_analysis(run_dir, as_of)
     usable, validation = output_is_usable(output_paths["csv"])

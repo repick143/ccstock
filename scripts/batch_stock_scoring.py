@@ -64,6 +64,22 @@ REQUIRED_SCORE_COLUMNS = [
     "归母净利润同比",
 ]
 
+BASE_OUTPUT_COLUMNS = [
+    "股票代码",
+    "股票名称",
+    "行业",
+    "细分赛道",
+    "标签",
+    "月涨幅(%)",
+    "年涨幅(%)",
+    "港股代码",
+    "基本面打分",
+    "短线打分",
+    "长线打分",
+    "目标价",
+    "备注",
+]
+
 
 HOT_SUBTRACK_KEYWORDS = {
     "CPO光引擎": 20,
@@ -555,7 +571,62 @@ def build_fundamental_score(row: pd.Series) -> Tuple[float, str]:
     return total, "；".join([x for x in reasons if x])
 
 
-def fetch_one(row: pd.Series, pause: float, timeout_sec: float) -> Dict[str, Any]:
+def build_target_price(row: pd.Series) -> Tuple[Optional[float], str]:
+    signal_price = row.get("信号价")
+    if pd.isna(signal_price):
+        return None, "缺少现价，无法估算目标价"
+
+    fund_score = safe_float(row.get("基本面打分")) or 0.0
+    short_score = safe_float(row.get("短期走势打分")) or 0.0
+    mid_score = safe_float(row.get("中期走势打分")) or 0.0
+    pe = row.get("市盈率_TTM")
+    profit_yoy = row.get("归母净利润同比")
+
+    base_upside = (fund_score - 50) * 0.0035 + (mid_score - 50) * 0.002 + (short_score - 50) * 0.0015
+    valuation_bonus = 0.0
+    if pd.notna(pe):
+        if pe <= 30:
+            valuation_bonus += 0.12
+        elif pe <= 50:
+            valuation_bonus += 0.08
+        elif pe <= 80:
+            valuation_bonus += 0.04
+        elif pe >= 120:
+            valuation_bonus -= 0.08
+    if pd.notna(profit_yoy):
+        if profit_yoy >= 50:
+            valuation_bonus += 0.08
+        elif profit_yoy >= 20:
+            valuation_bonus += 0.04
+        elif profit_yoy < 0:
+            valuation_bonus -= 0.08
+
+    upside = max(-0.25, min(0.8, base_upside + valuation_bonus))
+    target_price = float(signal_price) * (1 + upside)
+    return round(target_price, 2), f"基于综合评分推演，较现价预留{upside * 100:.1f}%空间"
+
+
+def build_summary_note(row: pd.Series, target_note: str) -> str:
+    parts: list[str] = []
+    if pd.notna(row.get("基本面打分")):
+        parts.append(f"基本面{row.get('基本面打分'):.1f}")
+    if pd.notna(row.get("短期走势打分")):
+        parts.append(f"短线{row.get('短期走势打分'):.1f}")
+    if pd.notna(row.get("中期走势打分")):
+        parts.append(f"中期{row.get('中期走势打分'):.1f}")
+
+    basis = []
+    for key in ("基本面依据", "短期依据", "中期依据"):
+        value = row.get(key)
+        if isinstance(value, str) and value:
+            basis.append(value)
+    parts.extend(basis[:2])
+    if target_note:
+        parts.append(target_note)
+    return " | ".join(parts[:5])
+
+
+def fetch_one(row: pd.Series, pause: float, timeout_sec: float, retries: int) -> Dict[str, Any]:
     code = zfill_code(row["股票代码"])
     name = row.get("股票名称", "")
     print(f"[FETCH] {code} {name}", flush=True)
@@ -568,11 +639,18 @@ def fetch_one(row: pd.Series, pause: float, timeout_sec: float) -> Dict[str, Any
         "标签": row.get("标签"),
         "月涨幅(%)": row.get("月涨幅(%)"),
         "年涨幅(%)": row.get("年涨幅(%)"),
+        "港股代码": row.get("港股代码"),
+        "基本面打分": row.get("基本面打分"),
+        "短线打分": row.get("短线打分"),
+        "长线打分": row.get("长线打分"),
+        "目标价": row.get("目标价"),
+        "备注": row.get("备注"),
     }
 
     spot_result = call_with_retry(
         ak.stock_individual_spot_xq,
         symbol=symbol_for_xq(code),
+        retries=retries,
         timeout_sec=timeout_sec,
     )
     if spot_result.error:
@@ -615,6 +693,7 @@ def fetch_one(row: pd.Series, pause: float, timeout_sec: float) -> Dict[str, Any
         ak.stock_zh_a_daily,
         symbol=symbol_for_daily(code),
         adjust="qfq",
+        retries=retries,
         timeout_sec=timeout_sec,
     )
     if daily_result.error:
@@ -625,6 +704,7 @@ def fetch_one(row: pd.Series, pause: float, timeout_sec: float) -> Dict[str, Any
     fin_result = call_with_retry(
         ak.stock_financial_abstract_new_ths,
         symbol=code,
+        retries=retries,
         timeout_sec=timeout_sec,
     )
     if fin_result.error:
@@ -684,6 +764,17 @@ def build_scores(df: pd.DataFrame) -> pd.DataFrame:
         out["基本面打分"] * 0.4 + out["短期走势打分"] * 0.3 + out["中期走势打分"] * 0.3
     ).round(1)
     out["综合排名"] = out["综合打分"].rank(method="min", ascending=False).astype(int)
+
+    target_prices = out.apply(build_target_price, axis=1, result_type="expand")
+    out["目标价"] = target_prices[0]
+    out["目标价依据"] = target_prices[1]
+    out["短线打分"] = out["短期走势打分"]
+    out["长线打分"] = out["中期走势打分"]
+    out["备注"] = out.apply(lambda row: build_summary_note(row, str(row.get("目标价依据", ""))), axis=1)
+
+    ordered_base = [col for col in BASE_OUTPUT_COLUMNS if col in out.columns]
+    remaining = [col for col in out.columns if col not in ordered_base]
+    out = out[ordered_base + remaining]
     return out.sort_values(["综合打分", "基本面打分"], ascending=[False, False]).reset_index(drop=True)
 
 
@@ -761,7 +852,7 @@ def build_report(df: pd.DataFrame, as_of: str) -> str:
   - RSI14
   - 5 日动量是否转正
 
-### 3. 中期走势打分（0-100）
+### 3. 长线/中期走势打分（0-100）
 
 - 趋势结构：0-40
   - 价位相对 MA20/MA60/MA120
@@ -776,6 +867,7 @@ def build_report(df: pd.DataFrame, as_of: str) -> str:
 ### 4. 综合打分
 
 - `综合打分 = 基本面 * 40% + 短期走势 * 30% + 中期走势 * 30%`
+- `目标价`：以信号价为锚，按基本面、短线、中期综合评分及估值/利润增速修正后的空间推演，不作为精确估值。
 
 ## 综合排名 Top 20
 
@@ -805,8 +897,9 @@ def main() -> None:
     parser.add_argument("--input", required=True, help="输入 CSV 文件路径")
     parser.add_argument("--output-dir", required=True, help="输出目录")
     parser.add_argument("--as-of", required=True, help="分析日期，例如 2026-05-20")
-    parser.add_argument("--pause", type=float, default=0.15, help="每只股票抓取后的额外暂停秒数")
-    parser.add_argument("--timeout", type=float, default=15.0, help="单次数据抓取超时秒数")
+    parser.add_argument("--pause", type=float, default=0.05, help="每只股票抓取后的额外暂停秒数")
+    parser.add_argument("--timeout", type=float, default=4.0, help="单次数据抓取超时秒数")
+    parser.add_argument("--retries", type=int, default=1, help="单接口抓取重试次数")
     args = parser.parse_args()
 
     input_path = Path(args.input).expanduser().resolve()
@@ -820,7 +913,7 @@ def main() -> None:
     for idx, (_, row) in enumerate(stock_df.iterrows(), start=1):
         print(f"[{idx}/{total}] 开始处理 {row['股票代码']} {row['股票名称']}", flush=True)
         try:
-            records.append(fetch_one(row, pause=args.pause, timeout_sec=args.timeout))
+            records.append(fetch_one(row, pause=args.pause, timeout_sec=args.timeout, retries=args.retries))
         except Exception as exc:  # noqa: BLE001
             records.append(
                 {
