@@ -19,7 +19,7 @@ from batch_stock_scoring import read_stock_list
 
 
 ROOT = Path(__file__).resolve().parents[1]
-INPUT_CSV = ROOT / "cg_task" / "file" / "stock_list(2).csv"
+INPUT_CSV = ROOT / "cg_task" / "file" / "stock_list.csv"
 OUTPUT_ROOT = ROOT / "cg_task" / "output"
 BATCH_SCRIPT = ROOT / "scripts" / "batch_stock_scoring.py"
 TIMEZONE_LABEL = "Asia/Shanghai"
@@ -129,7 +129,7 @@ def write_run_note(
             "",
             "## 文件说明",
             "",
-            "- `stock_list_scored_*.csv`：仅回填原始 13 列的交付表",
+            "- `stock_list_scored_*.csv`：仅回填原始 14 列的交付表",
             "- `stock_list_scored_*.xlsx`：Excel 版本交付表",
             "- `stock_list_scored_*.json`：保留全部抓取字段、评分细项与错误信息的结构化明细",
             "- `stock_list_scoring_report_*.md`：评分标准、Top 排名和异常样本说明",

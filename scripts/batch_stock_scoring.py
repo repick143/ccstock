@@ -72,12 +72,13 @@ BASE_OUTPUT_COLUMNS = [
     "标签",
     "月涨幅(%)",
     "年涨幅(%)",
-    "港股代码",
     "基本面打分",
+    "港股代码",
     "短线打分",
     "长线打分",
     "目标价",
     "备注",
+    "是否持仓股",
 ]
 
 
@@ -314,6 +315,8 @@ def extract_daily_snapshot(df: pd.DataFrame, spot_price: Optional[float]) -> Dic
         "日线日期": latest["date"].strftime("%Y-%m-%d"),
         "收盘价": float(latest["close"]),
         "信号价": signal_price,
+        "日线成交额": safe_float(latest["amount"]),
+        "日线换手率": safe_float(latest["turnover"]) * 100 if pd.notna(latest["turnover"]) else None,
         "MA5": safe_float(latest["ma5"]),
         "MA10": safe_float(latest["ma10"]),
         "MA20": safe_float(latest["ma20"]),
@@ -324,8 +327,11 @@ def extract_daily_snapshot(df: pd.DataFrame, spot_price: Optional[float]) -> Dic
         "20日涨幅": safe_float(latest["ret_20d"]),
         "60日涨幅": safe_float(latest["ret_60d"]),
         "120日涨幅": safe_float(latest["ret_120d"]),
+        "252日涨幅": safe_float(close.pct_change(252).iloc[-1] * 100) if len(close) > 252 else None,
         "5日均成交额": safe_float(latest["amt_ma5"]),
         "20日均成交额": safe_float(latest["amt_ma20"]),
+        "日线52周最高": safe_float(close.tail(252).max()),
+        "日线52周最低": safe_float(close.tail(252).min()),
         "20日回撤": dd20,
         "日线样本数": len(work),
     }
@@ -645,6 +651,7 @@ def fetch_one(row: pd.Series, pause: float, timeout_sec: float, retries: int) ->
         "长线打分": row.get("长线打分"),
         "目标价": row.get("目标价"),
         "备注": row.get("备注"),
+        "是否持仓股": row.get("是否持仓股"),
     }
 
     spot_result = call_with_retry(
@@ -711,6 +718,25 @@ def fetch_one(row: pd.Series, pause: float, timeout_sec: float, retries: int) ->
         record["financial_error"] = fin_result.error
     fin_snapshot = extract_financial_snapshot(fin_result.data) if fin_result.data is not None else {}
     record.update(fin_snapshot)
+
+    if record.get("现价") is None and record.get("收盘价") is not None:
+        record["现价"] = record.get("收盘价")
+    if record.get("信号价") is None and record.get("收盘价") is not None:
+        record["信号价"] = record.get("收盘价")
+    if record.get("成交额") is None and record.get("日线成交额") is not None:
+        record["成交额"] = record.get("日线成交额")
+    if record.get("成交额_亿元") is None and record.get("成交额") is not None:
+        record["成交额_亿元"] = record["成交额"] / 1e8
+    if record.get("周转率") is None and record.get("日线换手率") is not None:
+        record["周转率"] = record.get("日线换手率")
+    if record.get("52周最高") is None and record.get("日线52周最高") is not None:
+        record["52周最高"] = record.get("日线52周最高")
+    if record.get("52周最低") is None and record.get("日线52周最低") is not None:
+        record["52周最低"] = record.get("日线52周最低")
+    if pd.isna(record.get("月涨幅(%)")) and record.get("20日涨幅") is not None:
+        record["月涨幅(%)"] = record.get("20日涨幅")
+    if pd.isna(record.get("年涨幅(%)")) and record.get("252日涨幅") is not None:
+        record["年涨幅(%)"] = record.get("252日涨幅")
 
     if pause > 0:
         time.sleep(pause)
