@@ -95,6 +95,12 @@ def fetch_one_stock(code: str, years: int, client) -> List[tuple]:
     full = full[~full.index.duplicated(keep="first")]
     full = full.sort_index()
 
+    # 计算昨收价、涨跌额、涨跌幅
+    # 注：在日期过滤前计算，确保第一天的 pre_close 来自过滤前数据
+    full['pre_close'] = full['close'].shift(1)
+    full['chg_amt'] = full['close'] - full['pre_close']
+    full['chg_pct'] = (full['chg_amt'] / full['pre_close'] * 100).round(4)
+
     filter_cutoff = date.today() - timedelta(days=int(years * 365.25))
     full = full[full.index.date >= filter_cutoff]
 
@@ -115,6 +121,9 @@ def fetch_one_stock(code: str, years: int, client) -> List[tuple]:
                 round(float(row["close"]), 2),
                 int(row[vol_col]),
                 round(float(row["amount"]), 2),
+                round(float(row['pre_close']), 2) if pd.notna(row['pre_close']) else None,
+                round(float(row['chg_amt']), 2) if pd.notna(row['chg_amt']) else None,
+                round(float(row['chg_pct']), 4) if pd.notna(row['chg_pct']) else None,
             )
         )
     return records
@@ -148,14 +157,17 @@ def upsert_batch(conn, records: List[tuple]) -> int:
     """批量 upsert（新插旧更）。"""
     sql = """
         INSERT INTO stock_daily
-            (stock_code, stock_name, trade_date, open_price, high_price, low_price, close_price, volume, amount)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (stock_code, stock_name, trade_date, open_price, high_price, low_price, close_price, volume, amount, pre_close, chg_amt, chg_pct)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             stock_name  = VALUES(stock_name),
             open_price  = VALUES(open_price),
             high_price  = VALUES(high_price),
             low_price   = VALUES(low_price),
             close_price = VALUES(close_price),
+            pre_close   = VALUES(pre_close),
+            chg_amt     = VALUES(chg_amt),
+            chg_pct     = VALUES(chg_pct),
             volume      = VALUES(volume),
             amount      = VALUES(amount)
     """
@@ -258,3 +270,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+
