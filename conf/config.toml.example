@@ -1,0 +1,19 @@
+# ==========================================
+# ccstock 配置示例
+# 复制此文件为 config.toml 并修改参数
+#   cp conf/config.toml.example conf/config.toml
+# ==========================================
+
+[database]
+host     = "127.0.0.1"
+port     = 3306
+user     = "root"
+password = "your_password_here"
+database = "ccstock"
+
+[mootdx]
+market = "std"
+timeout = 8
+
+[etl]
+default_years = 2
