@@ -27,6 +27,7 @@ prettytable==3.17.0
 py-mini-racer==0.6.0
 pycparser==3.0
 Pygments==2.20.0
+PyMySQL==1.2.0
 python-dateutil==2.9.0.post0
 requests==2.34.2
 rich==15.0.0
