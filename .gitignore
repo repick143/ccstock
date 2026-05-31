@@ -2,3 +2,5 @@
 __pycache__/
 *.pyc
 conf/config.toml
+
+.pytest_cache/
