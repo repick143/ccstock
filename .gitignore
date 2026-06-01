@@ -1,6 +1,5 @@
 .venv/
 __pycache__/
 *.pyc
-conf/config.toml
 
 .pytest_cache/
