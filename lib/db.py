@@ -48,7 +48,7 @@ TABLE = "stock_daily"
 
 # 所有入库字段（不含 id / created_at / updated_at）
 COLUMNS = [
-    "stock_code", "stock_name", "trade_date",
+    "stock_code", "trade_date",
     "open_price", "high_price", "low_price", "close_price",
     "volume", "amount",
     "pre_close", "chg_amt", "chg_pct",

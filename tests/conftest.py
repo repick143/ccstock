@@ -31,7 +31,6 @@ def reset_config_cache():
 
 def make_db_row(
     code: str = "601869",
-    name: str | None = None,
     trade_date: date = date(2026, 5, 29),
     open_p: float = 369.97,
     high_p: float = 407.0,
@@ -46,7 +45,6 @@ def make_db_row(
     """构造一条模拟的 DB 查询结果行（DictCursor 格式）。"""
     return {
         "stock_code": code,
-        "stock_name": name,
         "trade_date": trade_date,
         "open_price": open_p,
         "high_price": high_p,

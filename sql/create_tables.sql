@@ -13,7 +13,6 @@ USE ccstock;
 CREATE TABLE IF NOT EXISTS stock_daily (
     id              BIGINT          AUTO_INCREMENT PRIMARY KEY     COMMENT '自增主键',
     stock_code      VARCHAR(10)     NOT NULL                        COMMENT 'A 股代码，如 601869',
-    stock_name      VARCHAR(50)     DEFAULT NULL                    COMMENT '股票简称，如 长飞光纤',
     trade_date      DATE            NOT NULL                        COMMENT '交易日',
     open_price      DECIMAL(12,2)   NOT NULL                        COMMENT '开盘价',
     high_price      DECIMAL(12,2)   NOT NULL                        COMMENT '最高价',

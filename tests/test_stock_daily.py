@@ -56,7 +56,7 @@ class TestBars:
         if cursor.executemany.called:
             records = cursor.executemany.call_args[0][1]
             for rec in records:
-                code, name, dt, op, hp, lp, cp, vol, amt, pc, ca, cpct = rec
+                code, dt, op, hp, lp, cp, vol, amt, pc, ca, cpct = rec
                 if pc is not None:
                     assert ca is not None
                     assert cpct is not None
@@ -112,10 +112,9 @@ class TestDfToRecords:
         assert len(records) == 5
         rec = records[0]
         assert rec[0] == "601869"
-        assert rec[1] is None
-        assert isinstance(rec[2], date)
-        assert rec[3] == 369.97
-        assert rec[6] == 402.81
+        assert isinstance(rec[1], date)
+        assert rec[2] == 369.97
+        assert rec[5] == 402.81
 
     def test_handles_nan_in_derived_fields(self, sample_mootdx_df):
         df = sample_mootdx_df.sort_index()
@@ -123,10 +122,10 @@ class TestDfToRecords:
         df["chg_amt"] = df["close"] - df["pre_close"]
         df["chg_pct"] = (df["chg_amt"] / df["pre_close"] * 100).round(4)
         records = DailyMarket._df_to_records("601869", df)
-        assert records[0][9] is None
+        assert records[0][8] is None
+        assert records[1][8] is not None
         assert records[1][9] is not None
         assert records[1][10] is not None
-        assert records[1][11] is not None
 
 
 class TestContextManager:
@@ -157,7 +156,6 @@ class TestAutoFillBehavior:
         dm.bars("601869", offset=1)
         first_call_count = mock_mootdx.bars.call_count
         cursor.fetchall.return_value = [{
-            "stock_code": "601869", "stock_name": None,
             "trade_date": date(2026, 5, 30),
             "open_price": 400.0, "high_price": 410.0, "low_price": 399.0,
             "close_price": 405.0, "volume": 100000, "amount": 4000000000.0,

@@ -93,7 +93,7 @@ class DailyMarket:
 
         返回:
             pd.DataFrame，index = trade_date，包含以下列：
-            stock_code, stock_name, open_price, high_price, low_price,
+            stock_code, trade_date, open_price, high_price, low_price,
             close_price, volume, amount, pre_close, chg_amt, chg_pct
 
         数据来源策略：
@@ -222,7 +222,7 @@ class DailyMarket:
         """
         将 mootdx 返回的 DataFrame 转换为 DB upsert 的记录列表。
 
-        记录格式: (stock_code, stock_name, trade_date, open_price,
+        记录格式: (stock_code, trade_date, open_price,
                     high_price, low_price, close_price, volume, amount,
                     pre_close, chg_amt, chg_pct)
         """
@@ -233,7 +233,6 @@ class DailyMarket:
             records.append(
                 (
                     code,
-                    None,  # stock_name（可在上游填入）
                     ts.date(),
                     round(float(row["open"]), 2),
                     round(float(row["high"]), 2),

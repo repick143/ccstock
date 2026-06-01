@@ -6,7 +6,7 @@
     from lib.stock_info import get_stock_list, get_stock_info
 
     df = get_stock_list()              # 全市场
-    row = get_stock_info("601869")    # 单只完整信息
+    row = get_stock_info("601869")    # 单只完整信息，包含 concepts
 """
 
 from __future__ import annotations
@@ -112,7 +112,30 @@ class _StockInfoDB:
         sql = f"SELECT {', '.join(COLUMNS)} FROM {TABLE} WHERE stock_code = %s"
         with self.conn.cursor() as cur:
             cur.execute(sql, (code,))
-            return cur.fetchone()
+            row = cur.fetchone()
+        if not row:
+            return None
+        row["concepts"] = self.get_concepts_by_code(code)
+        return row
+
+    def get_concepts_by_code(self, code: str) -> list[dict]:
+        """返回个股所属概念，按概念主表 ID 级联查询。"""
+        sql = """
+            SELECT
+                c.id AS concept_id,
+                c.code AS concept_code,
+                c.name AS concept_name,
+                c.source,
+                c.source_code
+            FROM stock_concept_map m
+            JOIN board_concept c ON c.id = m.concept_id
+            WHERE m.stock_code = %s
+            ORDER BY c.source, c.name, c.code
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(sql, (code,))
+            rows = cur.fetchall()
+        return list(rows) if rows else []
 
     def upsert_bulk_codes(self, records: List[Tuple[str, str]]) -> int:
         """批量 upsert 股票代码+名称（Phase 1）。"""
@@ -176,7 +199,7 @@ def get_stock_list() -> pd.DataFrame:
 
 
 def get_stock_info(code: str) -> Optional[dict]:
-    """获取单只股票基础信息（仅 DB）。"""
+    """获取单只股票基础信息（仅 DB），并级联返回所属概念列表。"""
     return _get_db().get_by_code(code)
 
 
