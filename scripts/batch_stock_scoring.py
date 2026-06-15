@@ -167,6 +167,20 @@ def zfill_code(code: Any) -> str:
     return str(code).strip().zfill(6)
 
 
+def normalize_hk_code(value: Any) -> Optional[str]:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    text = str(value).strip()
+    if not text or text.lower() == "nan":
+        return None
+    if text.endswith(".0"):
+        text = text[:-2]
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if not digits:
+        return text
+    return digits.zfill(5)
+
+
 def symbol_for_daily(code: str) -> str:
     code = zfill_code(code)
     if code.startswith(("83", "87", "92")):
@@ -221,6 +235,9 @@ def read_stock_list(path: Path) -> pd.DataFrame:
         try:
             df = pd.read_csv(path, encoding=encoding, dtype={"股票代码": str})
             df["股票代码"] = df["股票代码"].map(zfill_code)
+            if "港股代码" in df.columns:
+                df["港股代码"] = df["港股代码"].map(normalize_hk_code)
+            df["原始顺序"] = range(len(df))
             for col in ["月涨幅(%)", "年涨幅(%)"]:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -640,6 +657,7 @@ def fetch_one(row: pd.Series, pause: float, timeout_sec: float, retries: int) ->
     record: Dict[str, Any] = {
         "股票代码": code,
         "股票名称": name,
+        "原始顺序": row.get("原始顺序"),
         "行业": row.get("行业"),
         "细分赛道": row.get("细分赛道"),
         "标签": row.get("标签"),
@@ -795,13 +813,13 @@ def build_scores(df: pd.DataFrame) -> pd.DataFrame:
     out["目标价"] = target_prices[0]
     out["目标价依据"] = target_prices[1]
     out["短线打分"] = out["短期走势打分"]
-    out["长线打分"] = out["中期走势打分"]
+    out["长线打分"] = out["基本面打分"]
     out["备注"] = out.apply(lambda row: build_summary_note(row, str(row.get("目标价依据", ""))), axis=1)
 
     ordered_base = [col for col in BASE_OUTPUT_COLUMNS if col in out.columns]
     remaining = [col for col in out.columns if col not in ordered_base]
     out = out[ordered_base + remaining]
-    return out.sort_values(["综合打分", "基本面打分"], ascending=[False, False]).reset_index(drop=True)
+    return out
 
 
 def build_delivery_sheet(df: pd.DataFrame) -> pd.DataFrame:
@@ -809,6 +827,8 @@ def build_delivery_sheet(df: pd.DataFrame) -> pd.DataFrame:
     for column in BASE_OUTPUT_COLUMNS:
         if column not in delivery.columns:
             delivery[column] = np.nan
+    if "原始顺序" in delivery.columns:
+        delivery = delivery.sort_values("原始顺序", ascending=True)
     return delivery[BASE_OUTPUT_COLUMNS].copy()
 
 
@@ -818,20 +838,21 @@ def render_top_table(df: pd.DataFrame, columns: List[str], top_n: int) -> str:
 
 
 def build_report(df: pd.DataFrame, as_of: str) -> str:
+    ranked = df.sort_values(["综合打分", "基本面打分"], ascending=[False, False]).reset_index(drop=True)
     columns = ["股票代码", "股票名称", "综合打分", "基本面打分", "短期走势打分", "中期走势打分", "细分赛道"]
-    top_overall = render_top_table(df, columns, 20)
+    top_overall = render_top_table(ranked, columns, 20)
     top_fund = render_top_table(
-        df.sort_values(["基本面打分", "综合打分"], ascending=[False, False]),
+        ranked.sort_values(["基本面打分", "综合打分"], ascending=[False, False]),
         ["股票代码", "股票名称", "基本面打分", "总市值_亿元", "市盈率_TTM", "毛利率", "ROE", "归母净利润同比", "细分赛道"],
         15,
     )
     top_short = render_top_table(
-        df.sort_values(["短期走势打分", "综合打分"], ascending=[False, False]),
+        ranked.sort_values(["短期走势打分", "综合打分"], ascending=[False, False]),
         ["股票代码", "股票名称", "短期走势打分", "月涨幅(%)", "周转率", "成交额_亿元", "信号价", "MA20", "细分赛道"],
         15,
     )
     top_mid = render_top_table(
-        df.sort_values(["中期走势打分", "综合打分"], ascending=[False, False]),
+        ranked.sort_values(["中期走势打分", "综合打分"], ascending=[False, False]),
         ["股票代码", "股票名称", "中期走势打分", "60日涨幅", "120日涨幅", "52周位置", "20日回撤", "细分赛道"],
         15,
     )
@@ -841,7 +862,7 @@ def build_report(df: pd.DataFrame, as_of: str) -> str:
             return df[column].notna()
         return pd.Series(False, index=df.index)
 
-    error_rows = df.loc[
+    error_rows = ranked.loc[
         error_mask("spot_error") | error_mask("daily_error") | error_mask("financial_error")
     ].reindex(columns=["股票代码", "股票名称", "spot_error", "daily_error", "financial_error"])
 
@@ -886,7 +907,7 @@ def build_report(df: pd.DataFrame, as_of: str) -> str:
   - RSI14
   - 5 日动量是否转正
 
-### 3. 长线/中期走势打分（0-100）
+### 3. 中期走势打分（0-100）
 
 - 趋势结构：0-40
   - 价位相对 MA20/MA60/MA120
@@ -901,6 +922,11 @@ def build_report(df: pd.DataFrame, as_of: str) -> str:
 ### 4. 综合打分
 
 - `综合打分 = 基本面 * 40% + 短期走势 * 30% + 中期走势 * 30%`
+- 交付表字段映射：
+  - `基本面打分`：基本面维度分数
+  - `短线打分`：短期走势维度分数
+  - `长线打分`：按产业、市值、PE、毛利率、成长质量计算的长线逻辑分数，与 `基本面打分` 保持一致
+- `中期走势打分` 不新增到交付 CSV 列中，保留在 JSON 明细与 Markdown 报告里。
 - `目标价`：以信号价为锚，按基本面、短线、中期综合评分及估值/利润增速修正后的空间推演，不作为精确估值。
 
 ## 综合排名 Top 20
