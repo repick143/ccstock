@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -27,6 +28,30 @@ TIMEZONE_LABEL = "Asia/Shanghai"
 
 def now_local() -> datetime:
     return datetime.now()
+
+
+def resolve_python_executable() -> str:
+    candidates = [
+        sys.executable,
+        "/Users/chenchen/.pyenv/versions/3.10.15/bin/python",
+        "/usr/bin/python3",
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            probe = subprocess.run(
+                [candidate, "-c", "import akshare"],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        except OSError:
+            continue
+        if probe.returncode == 0:
+            return candidate
+    raise RuntimeError("未找到可用的 Python 解释器（需要可导入 akshare）")
 
 
 def build_run_dir(ts: datetime) -> Path:
@@ -54,8 +79,9 @@ def expected_output_paths(run_dir: Path, as_of: str) -> dict:
 
 
 def run_live_analysis(run_dir: Path, as_of: str) -> subprocess.CompletedProcess[str]:
+    python_executable = resolve_python_executable()
     cmd = [
-        "python3",
+        python_executable,
         str(BATCH_SCRIPT),
         "--input",
         str(INPUT_CSV),
@@ -119,7 +145,7 @@ def write_run_note(
         "## 数据口径",
         "",
         "- 基本面：`akshare.stock_financial_abstract_new_ths`",
-        "- 实时快照：`akshare.stock_individual_spot_xq`",
+        "- 实时快照：`akshare.stock_zh_a_spot_em`（一次性拉取全市场快照后按代码映射）",
         "- 趋势日线：`akshare.stock_zh_a_daily`",
         f"- 结果有效性检查：{validation}",
     ]

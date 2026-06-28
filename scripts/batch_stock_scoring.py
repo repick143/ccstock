@@ -4,7 +4,7 @@
 
 数据源：
 - akshare.stock_financial_abstract_new_ths: 财务摘要
-- akshare.stock_individual_spot_xq: 雪球个股实时快照
+- akshare.stock_zh_a_spot_em: 东方财富全市场实时快照
 - akshare.stock_zh_a_daily: 日线行情
 
 说明：
@@ -64,7 +64,7 @@ REQUIRED_SCORE_COLUMNS = [
     "归母净利润同比",
 ]
 
-BASE_OUTPUT_COLUMNS = [
+DEFAULT_OUTPUT_COLUMNS = [
     "股票代码",
     "股票名称",
     "行业",
@@ -73,7 +73,6 @@ BASE_OUTPUT_COLUMNS = [
     "月涨幅(%)",
     "年涨幅(%)",
     "基本面打分",
-    "港股代码",
     "短线打分",
     "长线打分",
     "目标价",
@@ -256,6 +255,57 @@ def normalize_spot_df(df: pd.DataFrame) -> Dict[str, Any]:
         if item:
             result[item] = row.get("value")
     return result
+
+
+def build_spot_snapshot_map(df: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
+    if df is None or df.empty:
+        return {}
+
+    work = df.copy()
+    rename_map = {
+        "代码": "股票代码",
+        "名称": "股票名称",
+        "最新价": "现价",
+        "涨跌幅": "涨幅",
+        "成交额": "成交额",
+        "换手率": "周转率",
+        "总市值": "总市值",
+        "流通市值": "流通市值",
+        "市盈率-动态": "市盈率_TTM",
+        "市净率": "市净率",
+        "60日涨跌幅": "60日涨幅",
+        "年初至今涨跌幅": "年初至今涨跌幅",
+    }
+    work = work.rename(columns=rename_map)
+    if "股票代码" not in work.columns:
+        return {}
+
+    work["股票代码"] = work["股票代码"].map(zfill_code)
+    spot_map: Dict[str, Dict[str, Any]] = {}
+
+    for _, row in work.iterrows():
+        code = row["股票代码"]
+        latest_price = safe_float(row.get("现价"))
+        total_mv = safe_float(row.get("总市值"))
+        float_mv = safe_float(row.get("流通市值"))
+        amount = safe_float(row.get("成交额"))
+
+        record = {
+            "现价": latest_price,
+            "涨幅": safe_float(row.get("涨幅")),
+            "周转率": safe_float(row.get("周转率")),
+            "成交额": amount,
+            "成交额_亿元": amount / 1e8 if amount is not None else None,
+            "流通市值_亿元": float_mv / 1e8 if float_mv is not None else None,
+            "总市值_亿元": total_mv / 1e8 if total_mv is not None else None,
+            "市盈率_TTM": safe_float(row.get("市盈率_TTM")),
+            "市净率": safe_float(row.get("市净率")),
+            "60日涨幅": safe_float(row.get("60日涨幅")),
+            "年涨幅(%)": safe_float(row.get("年初至今涨跌幅")),
+        }
+        spot_map[code] = record
+
+    return spot_map
 
 
 def extract_financial_snapshot(df: pd.DataFrame) -> Dict[str, Any]:
@@ -649,7 +699,13 @@ def build_summary_note(row: pd.Series, target_note: str) -> str:
     return " | ".join(parts[:5])
 
 
-def fetch_one(row: pd.Series, pause: float, timeout_sec: float, retries: int) -> Dict[str, Any]:
+def fetch_one(
+    row: pd.Series,
+    pause: float,
+    timeout_sec: float,
+    retries: int,
+    spot_map: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     code = zfill_code(row["股票代码"])
     name = row.get("股票名称", "")
     print(f"[FETCH] {code} {name}", flush=True)
@@ -672,47 +728,12 @@ def fetch_one(row: pd.Series, pause: float, timeout_sec: float, retries: int) ->
         "是否持仓股": row.get("是否持仓股"),
     }
 
-    spot_result = call_with_retry(
-        ak.stock_individual_spot_xq,
-        symbol=symbol_for_xq(code),
-        retries=retries,
-        timeout_sec=timeout_sec,
-    )
-    if spot_result.error:
-        record["spot_error"] = spot_result.error
-    spot = normalize_spot_df(spot_result.data) if spot_result.data is not None else {}
-
-    spot_price = safe_float(spot.get("现价"))
-    turnover = safe_float(spot.get("周转率"))
-    amount = safe_float(spot.get("成交额"))
-    float_mv = safe_float(spot.get("流通值"))
-    total_shares = safe_float(spot.get("基金份额/总股本"))
-    high_52 = safe_float(spot.get("52周最高"))
-    low_52 = safe_float(spot.get("52周最低"))
-
-    total_mv = None
-    if spot_price is not None and total_shares is not None:
-        total_mv = spot_price * total_shares
+    spot_snapshot = (spot_map or {}).get(code)
+    if spot_snapshot:
+        record.update(spot_snapshot)
     else:
-        total_mv = safe_float(spot.get("资产净值/总市值"))
-
-    record.update(
-        {
-            "快照时间": spot.get("时间"),
-            "现价": spot_price,
-            "涨幅": safe_float(spot.get("涨幅")),
-            "周转率": turnover,
-            "成交额": amount,
-            "成交额_亿元": amount / 1e8 if amount is not None else None,
-            "流通市值_亿元": float_mv / 1e8 if float_mv is not None else None,
-            "总市值_亿元": total_mv / 1e8 if total_mv is not None else None,
-            "市盈率_TTM": safe_float(spot.get("市盈率(TTM)")) or safe_float(spot.get("市盈率(动)")),
-            "市净率": safe_float(spot.get("市净率")),
-            "股息率_TTM": safe_float(spot.get("股息率(TTM)")),
-            "52周最高": high_52,
-            "52周最低": low_52,
-        }
-    )
+        record["spot_error"] = "东方财富实时快照缺失"
+    spot_price = safe_float(record.get("现价"))
 
     daily_result = call_with_retry(
         ak.stock_zh_a_daily,
@@ -789,7 +810,7 @@ def add_relative_features(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def build_scores(df: pd.DataFrame) -> pd.DataFrame:
+def build_scores(df: pd.DataFrame, output_columns: Optional[List[str]] = None) -> pd.DataFrame:
     out = add_relative_features(df)
 
     fundamentals = out.apply(build_fundamental_score, axis=1, result_type="expand")
@@ -816,20 +837,20 @@ def build_scores(df: pd.DataFrame) -> pd.DataFrame:
     out["长线打分"] = out["基本面打分"]
     out["备注"] = out.apply(lambda row: build_summary_note(row, str(row.get("目标价依据", ""))), axis=1)
 
-    ordered_base = [col for col in BASE_OUTPUT_COLUMNS if col in out.columns]
+    ordered_base = [col for col in (output_columns or DEFAULT_OUTPUT_COLUMNS) if col in out.columns]
     remaining = [col for col in out.columns if col not in ordered_base]
     out = out[ordered_base + remaining]
     return out
 
 
-def build_delivery_sheet(df: pd.DataFrame) -> pd.DataFrame:
+def build_delivery_sheet(df: pd.DataFrame, output_columns: List[str]) -> pd.DataFrame:
     delivery = df.copy()
-    for column in BASE_OUTPUT_COLUMNS:
+    for column in output_columns:
         if column not in delivery.columns:
             delivery[column] = np.nan
     if "原始顺序" in delivery.columns:
         delivery = delivery.sort_values("原始顺序", ascending=True)
-    return delivery[BASE_OUTPUT_COLUMNS].copy()
+    return delivery[output_columns].copy()
 
 
 def render_top_table(df: pd.DataFrame, columns: List[str], top_n: int) -> str:
@@ -876,7 +897,7 @@ def build_report(df: pd.DataFrame, as_of: str) -> str:
 - 样本数量：{len(df)}
 - 数据口径：
   - 基本面：akshare `stock_financial_abstract_new_ths`
-  - 实时快照：akshare `stock_individual_spot_xq`
+  - 实时快照：akshare `stock_zh_a_spot_em`
   - 趋势日线：akshare `stock_zh_a_daily`
   - 说明：若 {as_of} 当日日线尚未完全落库，则均线与涨幅基于最新可得日线；资金参与强度优先取 {as_of} 实时快照。
 
@@ -969,11 +990,32 @@ def main() -> None:
     stock_df = read_stock_list(input_path)
     records = []
     total = len(stock_df)
+    spot_map: Dict[str, Dict[str, Any]] = {}
+
+    spot_result = call_with_retry(
+        ak.stock_zh_a_spot_em,
+        retries=max(args.retries, 1),
+        pause=max(args.pause, 0.2),
+        timeout_sec=max(args.timeout * 40, 180.0),
+    )
+    if spot_result.error:
+        print(f"[WARN] 全市场实时快照抓取失败: {spot_result.error}", flush=True)
+    else:
+        spot_map = build_spot_snapshot_map(spot_result.data)
+        print(f"[INFO] 已加载实时快照 {len(spot_map)} 条", flush=True)
 
     for idx, (_, row) in enumerate(stock_df.iterrows(), start=1):
         print(f"[{idx}/{total}] 开始处理 {row['股票代码']} {row['股票名称']}", flush=True)
         try:
-            records.append(fetch_one(row, pause=args.pause, timeout_sec=args.timeout, retries=args.retries))
+            records.append(
+                fetch_one(
+                    row,
+                    pause=args.pause,
+                    timeout_sec=args.timeout,
+                    retries=args.retries,
+                    spot_map=spot_map,
+                )
+            )
         except Exception as exc:  # noqa: BLE001
             records.append(
                 {
@@ -988,7 +1030,10 @@ def main() -> None:
             print(f"[ERROR] {row['股票代码']} {row['股票名称']} {exc}", flush=True)
 
     result_df = pd.DataFrame(records)
-    scored_df = build_scores(result_df)
+    output_columns = [col for col in stock_df.columns if col != "原始顺序"]
+    if not output_columns:
+        output_columns = DEFAULT_OUTPUT_COLUMNS.copy()
+    scored_df = build_scores(result_df, output_columns=output_columns)
 
     date_tag = args.as_of.replace("-", "")
     csv_path = output_dir / f"stock_list_scored_{date_tag}.csv"
@@ -996,7 +1041,7 @@ def main() -> None:
     json_path = output_dir / f"stock_list_scored_{date_tag}.json"
     md_path = output_dir / f"stock_list_scoring_report_{date_tag}.md"
 
-    delivery_df = build_delivery_sheet(scored_df)
+    delivery_df = build_delivery_sheet(scored_df, output_columns=output_columns)
 
     delivery_df.to_csv(csv_path, index=False, encoding="utf-8-sig")
     try:
