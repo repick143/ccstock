@@ -16,10 +16,14 @@ from pathlib import Path
 
 import pandas as pd
 
-from batch_stock_scoring import read_stock_list
-
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+from batch_stock_scoring import read_stock_list
+
 INPUT_CSV = ROOT / "cg_task" / "file" / "stock_list.csv"
 OUTPUT_ROOT = ROOT / "cg_task" / "output"
 BATCH_SCRIPT = ROOT / "scripts" / "batch_stock_scoring.py"

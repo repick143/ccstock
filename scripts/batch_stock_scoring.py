@@ -834,7 +834,8 @@ def build_scores(df: pd.DataFrame, output_columns: Optional[List[str]] = None) -
     out["目标价"] = target_prices[0]
     out["目标价依据"] = target_prices[1]
     out["短线打分"] = out["短期走势打分"]
-    out["长线打分"] = out["基本面打分"]
+    # 交付表历史列名保留为“长线打分”，实际承载当前任务要求的中期走势维度。
+    out["长线打分"] = out["中期走势打分"]
     out["备注"] = out.apply(lambda row: build_summary_note(row, str(row.get("目标价依据", ""))), axis=1)
 
     ordered_base = [col for col in (output_columns or DEFAULT_OUTPUT_COLUMNS) if col in out.columns]
@@ -883,9 +884,19 @@ def build_report(df: pd.DataFrame, as_of: str) -> str:
             return df[column].notna()
         return pd.Series(False, index=df.index)
 
-    error_rows = ranked.loc[
-        error_mask("spot_error") | error_mask("daily_error") | error_mask("financial_error")
-    ].reindex(columns=["股票代码", "股票名称", "spot_error", "daily_error", "financial_error"])
+    ranked_error_mask = (
+        ranked["spot_error"].notna() if "spot_error" in ranked.columns else pd.Series(False, index=ranked.index)
+    ) | (
+        ranked["daily_error"].notna() if "daily_error" in ranked.columns else pd.Series(False, index=ranked.index)
+    ) | (
+        ranked["financial_error"].notna()
+        if "financial_error" in ranked.columns
+        else pd.Series(False, index=ranked.index)
+    )
+
+    error_rows = ranked.loc[ranked_error_mask].reindex(
+        columns=["股票代码", "股票名称", "spot_error", "daily_error", "financial_error"]
+    )
 
     error_section = "无明显抓取失败样本。"
     if not error_rows.empty:
@@ -946,8 +957,8 @@ def build_report(df: pd.DataFrame, as_of: str) -> str:
 - 交付表字段映射：
   - `基本面打分`：基本面维度分数
   - `短线打分`：短期走势维度分数
-  - `长线打分`：按产业、市值、PE、毛利率、成长质量计算的长线逻辑分数，与 `基本面打分` 保持一致
-- `中期走势打分` 不新增到交付 CSV 列中，保留在 JSON 明细与 Markdown 报告里。
+  - `长线打分`：因原始表结构限制，该列承载“中期走势”维度分数
+- `中期走势打分` 在 JSON 明细和 Markdown 报告中保留完整字段；交付 CSV/XLSX 中映射回 `长线打分`。
 - `目标价`：以信号价为锚，按基本面、短线、中期综合评分及估值/利润增速修正后的空间推演，不作为精确估值。
 
 ## 综合排名 Top 20
