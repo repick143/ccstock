@@ -162,6 +162,15 @@ def safe_float(value: Any) -> Optional[float]:
     return None
 
 
+def is_missing(value: Any) -> bool:
+    if value is None:
+        return True
+    try:
+        return bool(pd.isna(value))
+    except Exception:
+        return False
+
+
 def zfill_code(code: Any) -> str:
     return str(code).strip().zfill(6)
 
@@ -422,7 +431,7 @@ def score_industry_position(subtrack: str, tags: str) -> Tuple[float, str]:
 
 
 def score_market_cap(total_market_cap_billion: Optional[float]) -> Tuple[float, str]:
-    if total_market_cap_billion is None:
+    if is_missing(total_market_cap_billion):
         return 7.0, "缺少总市值数据，按中性处理"
     v = total_market_cap_billion
     if 100 <= v <= 800:
@@ -437,7 +446,7 @@ def score_market_cap(total_market_cap_billion: Optional[float]) -> Tuple[float, 
 
 
 def score_pe(pe_ttm: Optional[float], profit_yoy: Optional[float]) -> Tuple[float, str]:
-    if pe_ttm is None or pe_ttm <= 0:
+    if is_missing(pe_ttm) or pe_ttm <= 0:
         return 4.0, "PE不可用或为负，估值可信度较低"
     if pe_ttm <= 30:
         score = 20.0
@@ -856,6 +865,7 @@ def build_delivery_sheet(df: pd.DataFrame, output_columns: List[str]) -> pd.Data
 
 def render_top_table(df: pd.DataFrame, columns: List[str], top_n: int) -> str:
     sub = df.reindex(columns=columns).head(top_n).copy()
+    sub = sub.where(pd.notna(sub), "-")
     return sub.to_markdown(index=False)
 
 
@@ -900,6 +910,7 @@ def build_report(df: pd.DataFrame, as_of: str) -> str:
 
     error_section = "无明显抓取失败样本。"
     if not error_rows.empty:
+        error_rows = error_rows.where(pd.notna(error_rows), "-")
         error_section = error_rows.head(20).to_markdown(index=False)
 
     report = f"""# 股票批量评分报告
