@@ -189,6 +189,13 @@ def normalize_hk_code(value: Any) -> Optional[str]:
     return digits.zfill(5)
 
 
+def to_hk_symbol(code: str) -> str:
+    digits = "".join(ch for ch in str(code).strip() if ch.isdigit())
+    if len(digits) >= 5:
+        return digits[-5:]
+    return digits.zfill(5)
+
+
 def symbol_for_daily(code: str) -> str:
     code = zfill_code(code)
     if code.startswith(("83", "87", "92")):
@@ -344,6 +351,27 @@ def extract_financial_snapshot(df: pd.DataFrame) -> Dict[str, Any]:
     }
 
 
+def extract_hk_financial_snapshot(df: pd.DataFrame) -> Dict[str, Any]:
+    if df is None or df.empty:
+        return {}
+    work = df.copy()
+    work["REPORT_DATE"] = pd.to_datetime(work["REPORT_DATE"])
+    latest = work.sort_values("REPORT_DATE").iloc[-1]
+    report_date = latest["REPORT_DATE"]
+    return {
+        "财报期": report_date.strftime("%Y-%m-%d"),
+        "营收": safe_float(latest.get("OPERATE_INCOME")),
+        "营收同比": safe_float(latest.get("OPERATE_INCOME_YOY")),
+        "归母净利润": safe_float(latest.get("HOLDER_PROFIT")),
+        "归母净利润同比": safe_float(latest.get("HOLDER_PROFIT_YOY")),
+        "毛利率": safe_float(latest.get("GROSS_PROFIT_RATIO")),
+        "ROE": safe_float(latest.get("ROE_AVG")),
+        "资产负债率": safe_float(latest.get("DEBT_ASSET_RATIO")),
+        "每股净资产": safe_float(latest.get("BPS")),
+        "每股收益": safe_float(latest.get("BASIC_EPS")),
+    }
+
+
 def calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     delta = series.diff()
     gain = delta.clip(lower=0)
@@ -381,6 +409,7 @@ def extract_daily_snapshot(df: pd.DataFrame, spot_price: Optional[float]) -> Dic
     work["close_60d_max"] = close.rolling(60).max()
     work["close_120d_max"] = close.rolling(120).max()
     latest = work.iloc[-1]
+    turnover = safe_float(latest.get("turnover"))
 
     signal_price = spot_price if spot_price is not None else float(latest["close"])
     dd20 = None
@@ -392,7 +421,7 @@ def extract_daily_snapshot(df: pd.DataFrame, spot_price: Optional[float]) -> Dic
         "收盘价": float(latest["close"]),
         "信号价": signal_price,
         "日线成交额": safe_float(latest["amount"]),
-        "日线换手率": safe_float(latest["turnover"]) * 100 if pd.notna(latest["turnover"]) else None,
+        "日线换手率": turnover * 100 if turnover is not None else None,
         "MA5": safe_float(latest["ma5"]),
         "MA10": safe_float(latest["ma10"]),
         "MA20": safe_float(latest["ma20"]),
@@ -708,6 +737,48 @@ def build_summary_note(row: pd.Series, target_note: str) -> str:
     return " | ".join(parts[:5])
 
 
+def should_try_hk_fallback(code: str, daily_result: FetchResult, fin_result: FetchResult) -> bool:
+    if not code.startswith("00"):
+        return False
+    return daily_result.data is None and fin_result.data is None
+
+
+def fetch_hk_fallback(
+    code: str,
+    record: Dict[str, Any],
+    timeout_sec: float,
+    retries: int,
+) -> Dict[str, Any]:
+    hk_symbol = to_hk_symbol(code)
+    hk_daily_result = call_with_retry(
+        ak.stock_hk_daily,
+        symbol=hk_symbol,
+        adjust="qfq",
+        retries=retries,
+        timeout_sec=timeout_sec,
+    )
+    if hk_daily_result.error:
+        record["hk_daily_error"] = hk_daily_result.error
+    else:
+        record.update(extract_daily_snapshot(hk_daily_result.data, safe_float(record.get("现价"))))
+
+    hk_fin_result = call_with_retry(
+        ak.stock_financial_hk_analysis_indicator_em,
+        symbol=hk_symbol,
+        indicator="报告期",
+        retries=retries,
+        timeout_sec=timeout_sec,
+    )
+    if hk_fin_result.error:
+        record["hk_financial_error"] = hk_fin_result.error
+    else:
+        record.update(extract_hk_financial_snapshot(hk_fin_result.data))
+
+    if hk_daily_result.data is not None or hk_fin_result.data is not None:
+        record["market_type"] = "HK"
+    return record
+
+
 def fetch_one(
     row: pd.Series,
     pause: float,
@@ -766,6 +837,14 @@ def fetch_one(
         record["financial_error"] = fin_result.error
     fin_snapshot = extract_financial_snapshot(fin_result.data) if fin_result.data is not None else {}
     record.update(fin_snapshot)
+
+    if should_try_hk_fallback(code, daily_result, fin_result):
+        record = fetch_hk_fallback(
+            code=code,
+            record=record,
+            timeout_sec=timeout_sec,
+            retries=retries,
+        )
 
     if record.get("现价") is None and record.get("收盘价") is not None:
         record["现价"] = record.get("收盘价")
