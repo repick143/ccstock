@@ -50,6 +50,14 @@ def fnum(value: Any, digits: int = 2, suffix: str = "") -> str:
     return f"{text}{suffix}"
 
 
+def money(value: Any, digits: int = 2) -> str:
+    return fnum(value, digits, " 元")
+
+
+def normalize_missing_units(text: str) -> str:
+    return text.replace("缺失 元", "缺失").replace("缺失 亿", "缺失")
+
+
 def signed(value: Any, digits: int = 2, suffix: str = "%") -> str:
     value = clean(value)
     if value is None:
@@ -280,7 +288,7 @@ def build_prediction(row: pd.Series, run_dir: Path, run_label: str, stats: dict[
     if short_delta is not None:
         comparison_parts.append(f"短线打分变化 {short_delta}")
     if old_target is not None and target_now is not None:
-        comparison_parts.append(f"目标价从 {fnum(old_target, 2)} 元变为 {fnum(target_now, 2)} 元")
+        comparison_parts.append(f"目标价从 {money(old_target, 2)}变为 {money(target_now, 2)}")
     if value_for(row, "信号价") is not None and value_for(row, "MA20") is not None:
         comparison_parts.append("当前仍站在 MA20 上方" if row["信号价"] >= row["MA20"] else "当前跌至 MA20 下方")
     comparison = "，".join(comparison_parts)
@@ -304,7 +312,7 @@ def build_prediction(row: pd.Series, run_dir: Path, run_label: str, stats: dict[
 - 本次行情快照：采用 `{rel_run_dir}` 的有效批量结果；东方财富实时快照接口返回 `RemoteDisconnected`，本轮现价/信号价使用 `akshare.stock_zh_a_daily` 最新日线收盘价，日线日期 {value_for(row, "日线日期")}，财报期 {value_for(row, "财报期")}。
 - 结论：{conclusion}
 - 核心打分：综合 {fnum(value_for(row, "综合打分"), 1)}，基本面 {fnum(value_for(row, "基本面打分"), 1)}，短线 {fnum(value_for(row, "短期走势打分"), 1)}，中期 {fnum(value_for(row, "中期走势打分"), 1)}，综合排名 {fnum(value_for(row, "综合排名"), 0)}。
-- 行情位置：信号价 {fnum(value_for(row, "信号价"), 2)} 元；MA5/MA10/MA20/MA60 分别为 {fnum(value_for(row, "MA5"), 2)} 元 / {fnum(value_for(row, "MA10"), 2)} 元 / {fnum(value_for(row, "MA20"), 2)} 元 / {fnum(value_for(row, "MA60"), 2)} 元；20日回撤 {signed(value_for(row, "20日回撤"), 2)}。
+- 行情位置：信号价 {money(value_for(row, "信号价"), 2)}；MA5/MA10/MA20/MA60 分别为 {money(value_for(row, "MA5"), 2)} / {money(value_for(row, "MA10"), 2)} / {money(value_for(row, "MA20"), 2)} / {money(value_for(row, "MA60"), 2)}；20日回撤 {signed(value_for(row, "20日回撤"), 2)}。
 - 动量与资金：5日/20日/60日/120日涨幅分别为 {signed(value_for(row, "5日涨幅"), 2)} / {signed(value_for(row, "20日涨幅"), 2)} / {signed(value_for(row, "60日涨幅"), 2)} / {signed(value_for(row, "120日涨幅"), 2)}；换手率 {signed(value_for(row, "周转率"), 2)}，成交额 {fnum(value_for(row, "成交额_亿元"), 1)} 亿，RSI14 {fnum(value_for(row, "RSI14"), 1)}。
 - 偏强情景：若价格继续站稳 MA20 且成交额不明显萎缩，短线可按趋势延续或强势震荡处理。
 - 中性情景：若价格在 MA10-MA20 区间横盘，说明资金在消化前期涨幅，等待新的订单、财报或产业催化。
@@ -329,7 +337,7 @@ def build_intro(row: pd.Series, run_label: str, stats: dict[str, Any]) -> str:
 
 ## 一句话结论
 
-{row['股票名称']} 属于 {row.get('行业')} / {row.get('细分赛道')} 方向，本轮综合打分 {fnum(value_for(row, '综合打分'), 1)}，排名 {fnum(value_for(row, '综合排名'), 0)}。短线判断为：{conclusion}当前信号价为 {fnum(value_for(row, '信号价'), 2)} 元，MA20 为 {fnum(value_for(row, 'MA20'), 2)} 元，模型目标价为 {fnum(value_for(row, '目标价'), 2)} 元。由于东方财富实时快照缺失，本轮估值相关字段（总市值、PE、PB）不完整，目标价更多是日线趋势和财务摘要驱动的量化情景锚，不构成交易建议。
+{row['股票名称']} 属于 {row.get('行业')} / {row.get('细分赛道')} 方向，本轮综合打分 {fnum(value_for(row, '综合打分'), 1)}，排名 {fnum(value_for(row, '综合排名'), 0)}。短线判断为：{conclusion}当前信号价为 {money(value_for(row, '信号价'), 2)}，MA20 为 {money(value_for(row, 'MA20'), 2)}，模型目标价为 {money(value_for(row, '目标价'), 2)}。由于东方财富实时快照缺失，本轮估值相关字段（总市值、PE、PB）不完整，目标价更多是日线趋势和财务摘要驱动的量化情景锚，不构成交易建议。
 
 ## 公司概况
 
@@ -351,11 +359,11 @@ def build_intro(row: pd.Series, run_label: str, stats: dict[str, Any]) -> str:
 | 基本面打分 | {fnum(value_for(row, '基本面打分'), 1)} |
 | 短线打分 | {fnum(value_for(row, '短期走势打分'), 1)} |
 | 长线/中期打分 | {fnum(value_for(row, '中期走势打分'), 1)} |
-| 现价（日线收盘） | {fnum(value_for(row, '现价'), 2)} 元 |
-| 信号价 | {fnum(value_for(row, '信号价'), 2)} 元 |
-| 目标价 | {fnum(value_for(row, '目标价'), 2)} 元 |
-| MA5 / MA10 / MA20 | {fnum(value_for(row, 'MA5'), 2)} / {fnum(value_for(row, 'MA10'), 2)} / {fnum(value_for(row, 'MA20'), 2)} 元 |
-| MA60 / MA120 | {fnum(value_for(row, 'MA60'), 2)} / {fnum(value_for(row, 'MA120'), 2)} 元 |
+| 现价（日线收盘） | {money(value_for(row, '现价'), 2)} |
+| 信号价 | {money(value_for(row, '信号价'), 2)} |
+| 目标价 | {money(value_for(row, '目标价'), 2)} |
+| MA5 / MA10 / MA20 | {money(value_for(row, 'MA5'), 2)} / {money(value_for(row, 'MA10'), 2)} / {money(value_for(row, 'MA20'), 2)} |
+| MA60 / MA120 | {money(value_for(row, 'MA60'), 2)} / {money(value_for(row, 'MA120'), 2)} |
 | RSI14 | {fnum(value_for(row, 'RSI14'), 2)} |
 | 5日 / 20日涨幅 | {signed(value_for(row, '5日涨幅'), 2)} / {signed(value_for(row, '20日涨幅'), 2)} |
 | 60日 / 120日涨幅 | {signed(value_for(row, '60日涨幅'), 2)} / {signed(value_for(row, '120日涨幅'), 2)} |
@@ -367,7 +375,7 @@ def build_intro(row: pd.Series, run_label: str, stats: dict[str, Any]) -> str:
 | 营收同比 | {signed(value_for(row, '营收同比'), 2)} |
 | 归母净利润同比 | {signed(value_for(row, '归母净利润同比'), 2)} |
 | 资产负债率 | {signed(value_for(row, '资产负债率'), 2)} |
-| 每股收益 | {fnum(value_for(row, '每股收益'), 2)} 元 |
+| 每股收益 | {money(value_for(row, '每股收益'), 2)} |
 
 ## 基本面分析
 
@@ -388,7 +396,7 @@ def build_intro(row: pd.Series, run_label: str, stats: dict[str, Any]) -> str:
 ### 4. 估值和目标价
 
 - 实时快照失败，本轮缺少总市值、PE 和 PB；估值判断置信度低于实时快照可用时段。
-- {target_note}。当前信号价 {fnum(value_for(row, '信号价'), 2)} 元，对应目标价 {fnum(value_for(row, '目标价'), 2)} 元。
+- {target_note}。当前信号价 {money(value_for(row, '信号价'), 2)}，对应目标价 {money(value_for(row, '目标价'), 2)}。
 """
 
 
@@ -463,7 +471,7 @@ def replace_profile(row: pd.Series, run_dir: Path, run_label: str, stats: dict[s
         build_current_anomaly(row, run_label, stats).strip(),
         build_history(old_text, run_label).strip(),
     ]
-    new_text = "\n\n".join(parts).rstrip() + "\n"
+    new_text = normalize_missing_units("\n\n".join(parts)).rstrip() + "\n"
     path.write_text(new_text, encoding="utf-8")
     return not bool(old_text)
 
@@ -486,7 +494,7 @@ def write_run_note(
     df = pd.read_json(run_dir / f"stock_list_scored_{tag}.json")
     top = df.sort_values(["综合打分", "基本面打分"], ascending=[False, False]).head(10)
     top_lines = [
-        f"- {zcode(row['股票代码'])} {row['股票名称']}：综合 {fnum(row['综合打分'], 1)}，短线 {fnum(row['短期走势打分'], 1)}，目标价 {fnum(row['目标价'], 2)} 元"
+        f"- {zcode(row['股票代码'])} {row['股票名称']}：综合 {fnum(row['综合打分'], 1)}，短线 {fnum(row['短期走势打分'], 1)}，目标价 {money(row['目标价'], 2)}"
         for _, row in top.iterrows()
     ]
 
