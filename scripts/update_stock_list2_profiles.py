@@ -46,6 +46,8 @@ def fnum(value: Any, digits: int = 2, suffix: str = "") -> str:
         number = float(value)
     except (TypeError, ValueError):
         return str(value)
+    if digits == 0:
+        return f"{number:.0f}{suffix}"
     text = f"{number:.{digits}f}".rstrip("0").rstrip(".")
     return f"{text}{suffix}"
 
@@ -85,6 +87,11 @@ def stock_suffix(code: str) -> str:
 
 def value_for(row: pd.Series, key: str) -> Any:
     return clean(row.get(key))
+
+
+def display_value(row: pd.Series, key: str) -> str:
+    value = value_for(row, key)
+    return "缺失" if value is None else str(value)
 
 
 def bool_has(row: pd.Series, key: str) -> bool:
@@ -162,6 +169,28 @@ def global_stats(df: pd.DataFrame) -> dict[str, Any]:
 
     duplicate_codes = sorted(df.loc[df["股票代码"].duplicated(keep=False), "股票代码"].astype(str).unique())
     duplicate_names = sorted(df.loc[df["股票名称"].duplicated(keep=False), "股票名称"].astype(str).unique())
+    financial_errors: list[dict[str, str]] = []
+    if "financial_error" in df.columns:
+        err_df = df[df["financial_error"].notna()]
+        for _, row in err_df.iterrows():
+            financial_errors.append(
+                {
+                    "code": zcode(row["股票代码"]),
+                    "name": str(row["股票名称"]),
+                    "error": str(row["financial_error"]),
+                }
+            )
+    daily_errors: list[dict[str, str]] = []
+    if "daily_error" in df.columns:
+        err_df = df[df["daily_error"].notna()]
+        for _, row in err_df.iterrows():
+            daily_errors.append(
+                {
+                    "code": zcode(row["股票代码"]),
+                    "name": str(row["股票名称"]),
+                    "error": str(row["daily_error"]),
+                }
+            )
     return {
         "rows": len(df),
         "unique_codes": int(df["股票代码"].nunique()),
@@ -176,9 +205,32 @@ def global_stats(df: pd.DataFrame) -> dict[str, Any]:
         "market_cap_count": count("总市值_亿元"),
         "pe_count": count("市盈率_TTM"),
         "spot_error_count": int(df["spot_error"].notna().sum()) if "spot_error" in df.columns else 0,
+        "financial_error_count": int(df["financial_error"].notna().sum()) if "financial_error" in df.columns else 0,
+        "daily_error_count": int(df["daily_error"].notna().sum()) if "daily_error" in df.columns else 0,
+        "financial_errors": financial_errors,
+        "daily_errors": daily_errors,
         "daily_dates": dist("日线日期"),
         "report_dates": dist("财报期"),
     }
+
+
+def error_items(items: list[dict[str, str]]) -> str:
+    if not items:
+        return "无"
+    return "；".join(f"{item['code']} {item['name']}：{item['error']}" for item in items)
+
+
+def data_confidence_reason(stats: dict[str, Any]) -> str:
+    parts = ["日线现价/信号价/MA20完整"]
+    if stats["gross_count"] == stats["rows"] and stats["roe_count"] == stats["rows"]:
+        parts.append("财务摘要完整")
+    else:
+        parts.append(
+            f"财务摘要部分缺失（毛利率 {stats['gross_count']}/{stats['rows']}，ROE {stats['roe_count']}/{stats['rows']}）"
+        )
+    if stats["spot_error_count"]:
+        parts.append("全市场实时快照失败，估值和实时资金字段缺失")
+    return "，".join(parts)
 
 
 def profile_path(name: str) -> Path:
@@ -309,7 +361,7 @@ def build_prediction(row: pd.Series, run_dir: Path, run_label: str, stats: dict[
     return f"""### {run_label} 预测更新
 
 - 适用区间：{start_date:%Y-%m-%d} 至 {end_date:%Y-%m-%d}
-- 本次行情快照：采用 `{rel_run_dir}` 的有效批量结果；东方财富实时快照接口返回 `RemoteDisconnected`，本轮现价/信号价使用 `akshare.stock_zh_a_daily` 最新日线收盘价，日线日期 {value_for(row, "日线日期")}，财报期 {value_for(row, "财报期")}。
+- 本次行情快照：采用 `{rel_run_dir}` 的有效批量结果；东方财富实时快照接口返回 `RemoteDisconnected`，本轮现价/信号价使用 `akshare.stock_zh_a_daily` 最新日线收盘价，日线日期 {display_value(row, "日线日期")}，财报期 {display_value(row, "财报期")}。
 - 结论：{conclusion}
 - 核心打分：综合 {fnum(value_for(row, "综合打分"), 1)}，基本面 {fnum(value_for(row, "基本面打分"), 1)}，短线 {fnum(value_for(row, "短期走势打分"), 1)}，中期 {fnum(value_for(row, "中期走势打分"), 1)}，综合排名 {fnum(value_for(row, "综合排名"), 0)}。
 - 行情位置：信号价 {money(value_for(row, "信号价"), 2)}；MA5/MA10/MA20/MA60 分别为 {money(value_for(row, "MA5"), 2)} / {money(value_for(row, "MA10"), 2)} / {money(value_for(row, "MA20"), 2)} / {money(value_for(row, "MA60"), 2)}；20日回撤 {signed(value_for(row, "20日回撤"), 2)}。
@@ -321,7 +373,7 @@ def build_prediction(row: pd.Series, run_dir: Path, run_label: str, stats: dict[
 - 风险回归：风险等级初判为 {risk_level}；{risk_text}。
 - 数据说明：本标的{'；'.join(data_state)}。全局 {stats['price_count']}/{stats['rows']} 有日线现价，{stats['signal_count']}/{stats['rows']} 有信号价，{stats['ma20_count']}/{stats['rows']} 有 MA20，{stats['gross_count']}/{stats['rows']} 有财务摘要；日线日期分布为 {stats['daily_dates']}。
 - 资料来源：`{rel_run_dir / ('stock_list_scored_' + as_of.replace('-', '') + '.json')}`；`{rel_run_dir / ('stock_list_scoring_report_' + as_of.replace('-', '') + '.md')}`。
-- 预测置信度：中等偏低。原因是日线和财务摘要完整，但全市场实时快照失败，估值和实时资金字段缺失。
+- 预测置信度：中等偏低。原因是{data_confidence_reason(stats)}。
 """
 
 
@@ -348,8 +400,8 @@ def build_intro(row: pd.Series, run_label: str, stats: dict[str, Any]) -> str:
 | 行业 | {row.get('行业')} |
 | 细分赛道 | {row.get('细分赛道')} |
 | 标签 | {row.get('标签')} |
-| 财报期 | {value_for(row, '财报期')} |
-| 日线日期 | {value_for(row, '日线日期')} |
+| 财报期 | {display_value(row, '财报期')} |
+| 日线日期 | {display_value(row, '日线日期')} |
 
 ## 核心指标
 
@@ -428,6 +480,7 @@ def build_current_anomaly(row: pd.Series, run_label: str, stats: dict[str, Any])
 - 本轮改用 `akshare.stock_zh_a_daily` 最新日线收盘价作为现价/信号价，并使用日线成交额、换手率参与短线评分；{stats['price_count']}/{stats['rows']} 有日线现价，{stats['signal_count']}/{stats['rows']} 有信号价，{stats['ma20_count']}/{stats['rows']} 有 MA20，{stats['gross_count']}/{stats['rows']} 有财务摘要。
 - 本标的抓取状态：{'实时快照缺失' if bool_has(row, 'spot_error') else '实时快照可用'}；{'日线异常' if bool_has(row, 'daily_error') else '日线可用'}；{'财务摘要异常' if bool_has(row, 'financial_error') else '财务摘要可用'}。
 - 本轮全局异常：日线日期分布为 {stats['daily_dates']}；全部样本财报期分布为 {stats['report_dates']}。
+- 个股数据异常：日线异常 {stats['daily_error_count']}/{stats['rows']}（{error_items(stats['daily_errors'])}）；财务摘要异常 {stats['financial_error_count']}/{stats['rows']}（{error_items(stats['financial_errors'])}）。
 """
 
 
@@ -544,7 +597,8 @@ def write_run_note(
 - 全市场实时快照 `akshare.stock_zh_a_spot_em` 返回 `RemoteDisconnected`；本轮总市值、PE、PB 对 {stats['rows']}/{stats['rows']} 样本缺失。
 - 已使用 `akshare.stock_zh_a_daily` 最新日线收盘价作为现价/信号价，并使用日线成交额、换手率参与短线评分。
 - 日线日期分布：{stats['daily_dates']}。
-- 财务摘要全部可用：{stats['report_dates']}。
+- 财务摘要异常 {stats['financial_error_count']}/{stats['rows']}：{error_items(stats['financial_errors'])}。
+- 财报期分布：{stats['report_dates']}。
 
 ## 执行备注
 

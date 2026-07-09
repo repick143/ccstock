@@ -496,7 +496,7 @@ def score_pe(pe_ttm: Optional[float], profit_yoy: Optional[float]) -> Tuple[floa
 
 
 def score_gross_margin(gross_margin: Optional[float]) -> Tuple[float, str]:
-    if gross_margin is None:
+    if is_missing(gross_margin):
         return 8.0, "缺少毛利率数据，按中性处理"
     if gross_margin >= 50:
         return 20.0, f"毛利率{gross_margin:.1f}%，盈利壁垒强"
@@ -515,7 +515,7 @@ def score_quality_growth(roe: Optional[float], revenue_yoy: Optional[float], pro
     score = 0.0
     reasons = []
 
-    if roe is None:
+    if is_missing(roe):
         score += 4.0
         reasons.append("ROE缺失")
     elif roe >= 20:
@@ -534,8 +534,9 @@ def score_quality_growth(roe: Optional[float], revenue_yoy: Optional[float], pro
         score += 2.0
         reasons.append(f"ROE {roe:.1f}%偏低")
 
-    if revenue_yoy is None:
+    if is_missing(revenue_yoy):
         score += 3.0
+        reasons.append("营收同比缺失")
     elif revenue_yoy >= 30:
         score += 7.0
         reasons.append(f"营收同比{revenue_yoy:.1f}%")
@@ -549,8 +550,9 @@ def score_quality_growth(roe: Optional[float], revenue_yoy: Optional[float], pro
         score += 1.0
         reasons.append(f"营收同比{revenue_yoy:.1f}%")
 
-    if profit_yoy is None:
+    if is_missing(profit_yoy):
         score += 3.0
+        reasons.append("利润同比缺失")
     elif profit_yoy >= 50:
         score += 8.0
         reasons.append(f"利润同比{profit_yoy:.1f}%")
