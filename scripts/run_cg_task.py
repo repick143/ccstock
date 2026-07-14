@@ -72,6 +72,11 @@ def read_scored_json(path: Path) -> pd.DataFrame:
     return pd.read_json(path)
 
 
+def sync_delivery_to_input(scored_csv_path: Path) -> None:
+    delivery_df = pd.read_csv(scored_csv_path, encoding="utf-8-sig", dtype={"股票代码": str})
+    delivery_df.to_csv(INPUT_CSV, index=False, encoding="gb18030")
+
+
 def expected_output_paths(run_dir: Path, as_of: str) -> dict:
     date_tag = as_of.replace("-", "")
     return {
@@ -201,6 +206,8 @@ def main() -> None:
             validation=validation,
         )
         raise RuntimeError(f"本次任务失败，未复用历史结果：{validation}")
+
+    sync_delivery_to_input(output_paths["csv"])
 
     write_run_note(
         run_dir=run_dir,
