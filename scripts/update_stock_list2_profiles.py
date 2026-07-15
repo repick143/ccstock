@@ -530,7 +530,12 @@ def replace_profile(row: pd.Series, run_dir: Path, run_label: str, stats: dict[s
 
 
 def copy_delivery_csv(run_dir: Path, as_of: str, input_csv: Path) -> None:
-    scored = pd.read_csv(run_dir / f"stock_list_scored_{as_of.replace('-', '')}.csv", encoding="utf-8-sig")
+    scored = pd.read_csv(
+        run_dir / f"stock_list_scored_{as_of.replace('-', '')}.csv",
+        encoding="utf-8-sig",
+        dtype={"股票代码": str, "港股代码": str},
+    )
+    scored["股票代码"] = scored["股票代码"].map(zcode)
     scored.to_csv(input_csv, index=False, encoding="gb18030")
 
 
