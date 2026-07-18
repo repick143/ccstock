@@ -221,7 +221,19 @@ def error_items(items: list[dict[str, str]]) -> str:
 
 
 def data_confidence_reason(stats: dict[str, Any]) -> str:
-    parts = ["日线现价/信号价/MA20完整"]
+    if (
+        stats["price_count"] == stats["rows"]
+        and stats["signal_count"] == stats["rows"]
+        and stats["ma20_count"] == stats["rows"]
+    ):
+        parts = ["日线现价/信号价/MA20完整"]
+    else:
+        parts = [
+            "日线现价/信号价/MA20部分缺失"
+            f"（{stats['price_count']}/{stats['rows']}、"
+            f"{stats['signal_count']}/{stats['rows']}、"
+            f"{stats['ma20_count']}/{stats['rows']}）"
+        ]
     if stats["gross_count"] == stats["rows"] and stats["roe_count"] == stats["rows"]:
         parts.append("财务摘要完整")
     else:
@@ -602,6 +614,7 @@ def write_run_note(
 - 全市场实时快照 `akshare.stock_zh_a_spot_em` 返回 `RemoteDisconnected`；本轮总市值、PE、PB 对 {stats['rows']}/{stats['rows']} 样本缺失。
 - 已使用 `akshare.stock_zh_a_daily` 最新日线收盘价作为现价/信号价，并使用日线成交额、换手率参与短线评分。
 - 日线日期分布：{stats['daily_dates']}。
+- 日线异常 {stats['daily_error_count']}/{stats['rows']}：{error_items(stats['daily_errors'])}。
 - 财务摘要异常 {stats['financial_error_count']}/{stats['rows']}：{error_items(stats['financial_errors'])}。
 - 财报期分布：{stats['report_dates']}。
 

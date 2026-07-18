@@ -735,7 +735,10 @@ def build_summary_note(row: pd.Series, target_note: str) -> str:
             basis.append(value)
     parts.extend(basis[:2])
     if target_note:
-        parts.append(target_note)
+        if "无法估算目标价" in target_note and len(parts) >= 5:
+            parts = parts[:4] + [target_note]
+        else:
+            parts.append(target_note)
     return " | ".join(parts[:5])
 
 
@@ -941,7 +944,10 @@ def build_delivery_sheet(df: pd.DataFrame, output_columns: List[str]) -> pd.Data
             delivery[column] = np.nan
     if "原始顺序" in delivery.columns:
         delivery = delivery.sort_values("原始顺序", ascending=True)
-    return delivery[output_columns].copy()
+    delivery = delivery[output_columns].copy().astype(object)
+    blank_mask = delivery.map(lambda value: isinstance(value, str) and not value.strip())
+    delivery = delivery.mask(blank_mask)
+    return delivery.where(pd.notna(delivery), "缺失")
 
 
 def render_top_table(df: pd.DataFrame, columns: List[str], top_n: int) -> str:
